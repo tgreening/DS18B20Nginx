@@ -1,5 +1,5 @@
 // Import required libraries
-//#include <ESP8266WiFi.h>
+#include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -12,12 +12,14 @@
 
 
 // WiFi parameters
-const char* host = "house_temp";
-const char* probe_name;
-const char* delay_minutes;
-const char* server;
+const char* host = "housetemp";
+String delayMinutes;
+String serverAddress;
+String probeName;
+
 HTTPClient http;
 OneWire oneWire(D4);
+long nextReading = millis();
 
 DallasTemperature ds18b20(&oneWire);
 
@@ -34,6 +36,9 @@ void saveConfigCallback () {
 }
 void setup(void)
 {
+  const char* probe_name;
+  const char* delay_minutes;
+  const char* server;
   // Start Serial
   Serial.begin(115200);
   WiFiManager wifiManager;
@@ -98,7 +103,7 @@ void setup(void)
   Serial.println("delay minutes: " + String(delay_minutes));
   probe_name = custom_probe_name.getValue();
   Serial.println("probe name: " + String(probe_name));
-  
+
   //save the custom parameters to FS
   if (shouldSaveConfig) {
     Serial.println("saving config");
@@ -119,10 +124,11 @@ void setup(void)
     //end save
   }
 
-  while (WiFi.status() != WL_CONNECTED) {
+  /*while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-  }
+    }*/
+  WiFi.mode(WIFI_STA);
   ArduinoOTA.setHostname(host);
   ArduinoOTA.onStart([]() {
     String type;
@@ -150,36 +156,42 @@ void setup(void)
   });
   ArduinoOTA.begin();
 
-
-  // Connect to WiFi
-  WiFi.hostname(host);
   Serial.println("");
   Serial.println("WiFi connected");
 
   // Print the IP address
   Serial.println(WiFi.localIP());
   ds18b20.begin();
+  serverAddress = String(server);
+  delayMinutes = String(delay_minutes);
+  probeName = String(probe_name);
+  Serial.println("Server: " + serverAddress);
+  Serial.println("Delay: " + delayMinutes);
+
 }
 
 void loop() {
-  String URL = "http://" + String(server) + "/temperature/" +  String(probe_name) + "/reading/";
-  Serial.println(URL);
-  http.begin(URL);
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-  ds18b20.requestTemperatures(); // Send the command to get temperatures
-  float currentReading = getReading(ds18b20);
-  String payload = "degrees=" ;
-  payload.concat(currentReading);
-  payload += "&units=F";
-  Serial.println(payload);
-  int httpCode = http.POST(payload);
-  String answer = http.getString();                  //Get the response payload
+  if ((long) millis() - nextReading >= 0) {
+    String URL = "http://" + serverAddress + "/temperature/" +  probeName + "/reading/";
+    Serial.println(URL);
+    http.begin(URL);
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    ds18b20.requestTemperatures(); // Send the command to get temperatures
+    float currentReading = getReading(ds18b20);
+    String payload = "degrees=" ;
+    payload.concat(currentReading);
+    payload += "&units=F";
+    Serial.println(payload);
+    int httpCode = http.POST(payload);
+    String answer = http.getString();                  //Get the response payload
 
-  Serial.println(httpCode);   //Print HTTP return code
-  Serial.println(answer);    //Print request response payload
+    Serial.println(httpCode);   //Print HTTP return code
+    Serial.println(answer);    //Print request response payload
 
-  http.end();  //Close connection
-  delay(atoi(delay_minutes) * 60000);
+    http.end();  //Close connection
+    nextReading = millis() + (delayMinutes.toInt() * 60000);
+  }
+  ArduinoOTA.handle();
 }
 
 float getReading(DallasTemperature sensor) {
